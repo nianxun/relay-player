@@ -26,7 +26,10 @@ Relay Player 是一个面向 Windows 的 Emby 桌面播放器客户端。它负�
 - 已安装 `mpv.net`。如果不在 `PATH` 中，可在应用内选择 `mpvnet.exe`。
 - 可访问的 Emby 服务器和有效用户账号。
 
-自包含发布包不要求目标机器额外安装 .NET 运行时。
+发布包分为两种：
+
+- `RelayPlayer-win-x64-self-contained.zip`：体积更大，但目标机器不需要额外安装 .NET 运行时。
+- `RelayPlayer-win-x64-framework-dependent-portable.zip`：体积小很多，但目标机器需要安装 .NET 10 Desktop Runtime。
 
 ## 快速启动
 
@@ -72,10 +75,22 @@ dotnet publish .\src\Player.App\Player.App.csproj `
   -o .\artifacts\RelayPlayer-win-x64
 ```
 
+生成体积更小的 Windows x64 框架依赖便携目录：
+
+```powershell
+dotnet publish .\src\Player.App\Player.App.csproj `
+  -c Release `
+  -r win-x64 `
+  --self-contained false `
+  -p:PublishSingleFile=false `
+  -o .\artifacts\RelayPlayer-win-x64-framework-dependent-portable
+```
+
 生成 zip 包：
 
 ```powershell
-Compress-Archive -Path .\artifacts\RelayPlayer-win-x64\* -DestinationPath .\artifacts\RelayPlayer-win-x64.zip -Force
+Compress-Archive -Path .\artifacts\RelayPlayer-win-x64\* -DestinationPath .\artifacts\RelayPlayer-win-x64-self-contained.zip -Force
+Compress-Archive -Path .\artifacts\RelayPlayer-win-x64-framework-dependent-portable\* -DestinationPath .\artifacts\RelayPlayer-win-x64-framework-dependent-portable.zip -Force
 ```
 
 ## GitHub Actions 自动打包
@@ -88,11 +103,15 @@ Compress-Archive -Path .\artifacts\RelayPlayer-win-x64\* -DestinationPath .\arti
 - Release 构建
 - 运行测试
 - 发布 `win-x64` 自包含包
-- 压缩 zip
+- 发布 `win-x64` 框架依赖便携包
+- 分别压缩 zip
 - 上传 artifact
 - `v*` 标签时创建或更新 GitHub Release
 
-上传的文件名为 `RelayPlayer-win-x64.zip`。
+上传的文件名为：
+
+- `RelayPlayer-win-x64-self-contained.zip`
+- `RelayPlayer-win-x64-framework-dependent-portable.zip`
 
 ## 项目结构
 

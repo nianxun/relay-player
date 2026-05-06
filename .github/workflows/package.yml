@@ -18,8 +18,10 @@ env:
   DOTNET_VERSION: '10.0.x'
   PROJECT_PATH: src/Player.App/Player.App.csproj
   RUNTIME_ID: win-x64
-  PUBLISH_DIR: artifacts/RelayPlayer-win-x64
-  PACKAGE_PATH: artifacts/RelayPlayer-win-x64.zip
+  SELF_CONTAINED_DIR: artifacts/RelayPlayer-win-x64-self-contained
+  FRAMEWORK_DEPENDENT_DIR: artifacts/RelayPlayer-win-x64-framework-dependent-portable
+  SELF_CONTAINED_PACKAGE: artifacts/RelayPlayer-win-x64-self-contained.zip
+  FRAMEWORK_DEPENDENT_PACKAGE: artifacts/RelayPlayer-win-x64-framework-dependent-portable.zip
 
 jobs:
   package:
@@ -31,7 +33,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -44,7 +46,7 @@ jobs:
       - name: Test
         run: dotnet test .\Player.sln -c Release --no-build
 
-      - name: Publish win-x64
+      - name: Publish win-x64 self-contained
         run: >
           dotnet publish $env:PROJECT_PATH
           -c Release
@@ -53,16 +55,34 @@ jobs:
           -p:PublishSingleFile=true
           -p:IncludeNativeLibrariesForSelfExtract=true
           -p:EnableCompressionInSingleFile=true
-          -o $env:PUBLISH_DIR
+          -o $env:SELF_CONTAINED_DIR
 
-      - name: Create zip package
-        run: Compress-Archive -Path "$env:PUBLISH_DIR\*" -DestinationPath $env:PACKAGE_PATH -Force
+      - name: Publish win-x64 framework-dependent portable
+        run: >
+          dotnet publish $env:PROJECT_PATH
+          -c Release
+          -r $env:RUNTIME_ID
+          --self-contained false
+          -p:PublishSingleFile=false
+          -o $env:FRAMEWORK_DEPENDENT_DIR
 
-      - name: Upload package artifact
-        uses: actions/upload-artifact@v4
+      - name: Create zip packages
+        run: |
+          Compress-Archive -Path "$env:SELF_CONTAINED_DIR\*" -DestinationPath $env:SELF_CONTAINED_PACKAGE -Force
+          Compress-Archive -Path "$env:FRAMEWORK_DEPENDENT_DIR\*" -DestinationPath $env:FRAMEWORK_DEPENDENT_PACKAGE -Force
+
+      - name: Upload self-contained package artifact
+        uses: actions/upload-artifact@v6
         with:
-          name: RelayPlayer-win-x64
-          path: ${{ env.PACKAGE_PATH }}
+          name: RelayPlayer-win-x64-self-contained
+          path: ${{ env.SELF_CONTAINED_PACKAGE }}
+          if-no-files-found: error
+
+      - name: Upload framework-dependent package artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: RelayPlayer-win-x64-framework-dependent-portable
+          path: ${{ env.FRAMEWORK_DEPENDENT_PACKAGE }}
           if-no-files-found: error
 
       - name: Create or update GitHub release
@@ -72,7 +92,7 @@ jobs:
         run: |
           $tag = "${{ github.ref_name }}"
           if (gh release view $tag 2>$null) {
-            gh release upload $tag $env:PACKAGE_PATH --clobber
+            gh release upload $tag $env:SELF_CONTAINED_PACKAGE $env:FRAMEWORK_DEPENDENT_PACKAGE --clobber
           } else {
-            gh release create $tag $env:PACKAGE_PATH --generate-notes --title $tag
+            gh release create $tag $env:SELF_CONTAINED_PACKAGE $env:FRAMEWORK_DEPENDENT_PACKAGE --generate-notes --title $tag
           }

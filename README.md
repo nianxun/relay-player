@@ -26,7 +26,10 @@ The goal is simple: keep Emby library access and playback state inside a lightwe
 - `mpv.net` installed. If it is not available in `PATH`, select `mpvnet.exe` in the app.
 - An accessible Emby server and a valid user account.
 
-Self-contained release builds do not require the .NET runtime to be installed on the target machine.
+Release builds are published in two forms:
+
+- `RelayPlayer-win-x64-self-contained.zip`: larger, but does not require the .NET runtime on the target machine.
+- `RelayPlayer-win-x64-framework-dependent-portable.zip`: much smaller, but requires the .NET 10 Desktop Runtime.
 
 ## Quick Start
 
@@ -72,10 +75,22 @@ dotnet publish .\src\Player.App\Player.App.csproj `
   -o .\artifacts\RelayPlayer-win-x64
 ```
 
-Create a zip package:
+Create a smaller framework-dependent Windows x64 portable build:
 
 ```powershell
-Compress-Archive -Path .\artifacts\RelayPlayer-win-x64\* -DestinationPath .\artifacts\RelayPlayer-win-x64.zip -Force
+dotnet publish .\src\Player.App\Player.App.csproj `
+  -c Release `
+  -r win-x64 `
+  --self-contained false `
+  -p:PublishSingleFile=false `
+  -o .\artifacts\RelayPlayer-win-x64-framework-dependent-portable
+```
+
+Create zip packages:
+
+```powershell
+Compress-Archive -Path .\artifacts\RelayPlayer-win-x64\* -DestinationPath .\artifacts\RelayPlayer-win-x64-self-contained.zip -Force
+Compress-Archive -Path .\artifacts\RelayPlayer-win-x64-framework-dependent-portable\* -DestinationPath .\artifacts\RelayPlayer-win-x64-framework-dependent-portable.zip -Force
 ```
 
 ## GitHub Actions Packaging
@@ -88,11 +103,15 @@ It performs:
 - Release build
 - test
 - `win-x64` self-contained publish
-- zip packaging
+- `win-x64` framework-dependent portable publish
+- zip packaging for both builds
 - artifact upload
 - GitHub Release creation or update for `v*` tags
 
-The uploaded artifact is named `RelayPlayer-win-x64.zip`.
+The uploaded artifacts are:
+
+- `RelayPlayer-win-x64-self-contained.zip`
+- `RelayPlayer-win-x64-framework-dependent-portable.zip`
 
 ## Project Layout
 
