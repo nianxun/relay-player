@@ -1,0 +1,78 @@
+name: Build and Package
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  DOTNET_VERSION: '10.0.x'
+  PROJECT_PATH: src/Player.App/Player.App.csproj
+  RUNTIME_ID: win-x64
+  PUBLISH_DIR: artifacts/RelayPlayer-win-x64
+  PACKAGE_PATH: artifacts/RelayPlayer-win-x64.zip
+
+jobs:
+  package:
+    name: Build, test, and package
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore .\Player.sln
+
+      - name: Build
+        run: dotnet build .\Player.sln -c Release --no-restore
+
+      - name: Test
+        run: dotnet test .\Player.sln -c Release --no-build
+
+      - name: Publish win-x64
+        run: >
+          dotnet publish $env:PROJECT_PATH
+          -c Release
+          -r $env:RUNTIME_ID
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
+          -o $env:PUBLISH_DIR
+
+      - name: Create zip package
+        run: Compress-Archive -Path "$env:PUBLISH_DIR\*" -DestinationPath $env:PACKAGE_PATH -Force
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RelayPlayer-win-x64
+          path: ${{ env.PACKAGE_PATH }}
+          if-no-files-found: error
+
+      - name: Create or update GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if (gh release view $tag 2>$null) {
+            gh release upload $tag $env:PACKAGE_PATH --clobber
+          } else {
+            gh release create $tag $env:PACKAGE_PATH --generate-notes --title $tag
+          }
