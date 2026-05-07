@@ -4,6 +4,7 @@ using System.IO;
 using System.IO.Pipes;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace Player.App.Services;
 
@@ -13,6 +14,8 @@ public sealed class MpvIpcClient
     {
         PropertyNameCaseInsensitive = true
     };
+
+    private const int MpvVersionRequestId = 4101;
 
     /// <summary>
     /// 监听 mpv IPC 事件，定期上报播放进度，并返回本次播放是否自然播完。
@@ -107,6 +110,8 @@ public sealed class MpvIpcClient
             };
 
             using var reader = new StreamReader(pipe, Encoding.UTF8, leaveOpen: true);
+            var supportsLoadFileInsertIndex =
+                await DetectLoadFileInsertIndexSupportAsync(writer, reader, cancellationToken);
 
             await SendAsync(writer, new
             {
@@ -162,7 +167,8 @@ public sealed class MpvIpcClient
                 await ApplyDisplayTitleAsync(writer, nextItem.DisplayTitle, cancellationToken);
                 await SendAsync(writer, new
                 {
-                    command = BuildLoadFileCommand(nextItem.StreamUri, nextItem.InitialPosition)
+                    command = BuildLoadFileCommand(nextItem.StreamUri, nextItem.InitialPosition,
+                        supportsLoadFileInsertIndex)
                 }, cancellationToken);
             }
         }
@@ -221,23 +227,66 @@ public sealed class MpvIpcClient
     }
 
     /// <summary>
+    /// 读取运行中 mpv 的版本，决定连播切集时是否要使用 0.38+ 新增的插入索引参数。
+    /// </summary>
+    private static async Task<bool> DetectLoadFileInsertIndexSupportAsync(
+        StreamWriter writer,
+        StreamReader reader,
+        CancellationToken cancellationToken)
+    {
+        await SendAsync(writer, new
+        {
+            command = new object[] { "get_property_string", "mpv-version" },
+            request_id = MpvVersionRequestId
+        }, cancellationToken);
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            var line = await reader.ReadLineAsync(cancellationToken);
+            if (line is null)
+            {
+                break;
+            }
+
+            if (TryReadCommandStringResponse(line, MpvVersionRequestId, out var mpvVersion))
+            {
+                return SupportsLoadFileInsertIndex(mpvVersion);
+            }
+        }
+
+        // 探测失败时回退旧格式，优先保证 0.37 这类仍在广泛使用的 mpv.net 可以完成连播。
+        return false;
+    }
+
+    /// <summary>
     /// 构造连播切集命令，并把起播位置作为 mpv 的 per-file option 传入。
     /// </summary>
-    /// <remarks>
-    /// 首集启动时可能携带 <c>--start</c> 续播参数；mpv 的命令行选项会影响后续文件。
-    /// 因此下一集必须显式传 <c>start=0</c>，否则 mpv 会沿用上一集的历史进度。
-    /// mpv 0.38 起 <c>loadfile</c> 的第四个参数是插入索引，使用 options 时需要把索引设为 -1。
-    /// </remarks>
+    internal static object[] BuildLoadFileCommand(Uri streamUri, TimeSpan initialPosition, bool supportsInsertIndex)
+    {
+        return supportsInsertIndex
+            ?
+            [
+                "loadfile",
+                streamUri.ToString(),
+                "replace",
+                -1,
+                $"start={FormatLoadFileStartOption(initialPosition)}"
+            ]
+            :
+            [
+                "loadfile",
+                streamUri.ToString(),
+                "replace",
+                $"start={FormatLoadFileStartOption(initialPosition)}"
+            ];
+    }
+
+    /// <summary>
+    /// 兼容现有测试和调用方，默认返回 0.38+ 使用的新命令格式。
+    /// </summary>
     internal static object[] BuildLoadFileCommand(Uri streamUri, TimeSpan initialPosition)
     {
-        return
-        [
-            "loadfile",
-            streamUri.ToString(),
-            "replace",
-            -1,
-            $"start={FormatLoadFileStartOption(initialPosition)}"
-        ];
+        return BuildLoadFileCommand(streamUri, initialPosition, supportsInsertIndex: true);
     }
 
     /// <summary>
@@ -317,6 +366,65 @@ public sealed class MpvIpcClient
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// 从命令响应中提取字符串结果，只消费当前请求自己的回复，避免把普通事件误判成 RPC 返回。
+    /// </summary>
+    private static bool TryReadCommandStringResponse(string line, int requestId, out string data)
+    {
+        data = string.Empty;
+
+        try
+        {
+            using var document = JsonDocument.Parse(line);
+            if (!document.RootElement.TryGetProperty("request_id", out var requestIdElement) ||
+                requestIdElement.ValueKind != JsonValueKind.Number ||
+                requestIdElement.GetInt32() != requestId)
+            {
+                return false;
+            }
+
+            if (!document.RootElement.TryGetProperty("error", out var error) ||
+                !string.Equals(error.GetString(), "success", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (!document.RootElement.TryGetProperty("data", out var responseData) ||
+                responseData.ValueKind != JsonValueKind.String)
+            {
+                return false;
+            }
+
+            data = responseData.GetString() ?? string.Empty;
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 判断当前 mpv 版本是否支持带插入索引的 0.38+ loadfile 参数格式。
+    /// </summary>
+    internal static bool SupportsLoadFileInsertIndex(string mpvVersion)
+    {
+        if (string.IsNullOrWhiteSpace(mpvVersion))
+        {
+            return false;
+        }
+
+        var match = Regex.Match(mpvVersion, @"(?<!\d)(?<major>\d+)\.(?<minor>\d+)(?:\.(?<patch>\d+))?");
+        if (!match.Success)
+        {
+            return false;
+        }
+
+        var major = int.Parse(match.Groups["major"].Value, CultureInfo.InvariantCulture);
+        var minor = int.Parse(match.Groups["minor"].Value, CultureInfo.InvariantCulture);
+        return major > 0 || minor >= 38;
     }
 
     /// <summary>
