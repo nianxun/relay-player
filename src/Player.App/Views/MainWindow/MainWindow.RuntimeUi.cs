@@ -60,6 +60,55 @@ public partial class MainWindow
         Dispatcher.Invoke(() => SetStatus(e.Message));
     }
 
+    /// <summary>
+    /// mpv.net 关闭或当前文件停止后，重新拉取 Emby 最新播放状态并刷新详情面板。
+    /// </summary>
+    private async void PlaybackCoordinator_PlaybackStopped(object? sender, PlaybackStoppedEventArgs e)
+    {
+        try
+        {
+            await RefreshPlaybackStateAfterStopAsync(e);
+        }
+        catch (Exception ex)
+        {
+            _ = _logger.ErrorAsync("播放停止后刷新详情失败。", ex);
+            Dispatcher.Invoke(() => SetStatus("播放已停止，但刷新详情失败。"));
+        }
+    }
+
+    /// <summary>
+    /// 停止上报后从 Emby 读取服务器端最终状态，避免详情页继续显示旧续播位置或旧已播放标记。
+    /// </summary>
+    private async Task RefreshPlaybackStateAfterStopAsync(PlaybackStoppedEventArgs playback)
+    {
+        if (!HasSavedSession() || string.IsNullOrWhiteSpace(playback.ItemId))
+        {
+            return;
+        }
+
+        var refreshedItem = await _embyClient.GetItemAsync(playback.ItemId, _settings.UserId, CancellationToken.None);
+        AttachArtworkUris([refreshedItem]);
+
+        await Dispatcher.InvokeAsync(() =>
+        {
+            ApplyPlaybackStateSnapshot(refreshedItem);
+            if (_selectedItem is not null &&
+                string.Equals(_selectedItem.Id, refreshedItem.Id, StringComparison.Ordinal))
+            {
+                SelectedMetaTextBlock.Text = _selectedItem.MetaLine;
+                SelectedOverviewTextBlock.Text = string.IsNullOrWhiteSpace(_selectedItem.Overview)
+                    ? "暂无简介。"
+                    : _selectedItem.Overview.Trim();
+                BindPosterImage(_selectedItem);
+                RefreshPlayedUiState(_selectedItem);
+            }
+
+            ItemsListView.Items.Refresh();
+            EpisodeComboBox.Items.Refresh();
+            SetStatus($"播放已停止：{playback.DisplayTitle}");
+        });
+    }
+
 }
 
 

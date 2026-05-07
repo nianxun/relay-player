@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.IO.Pipes;
 using System.Text;
@@ -161,7 +162,7 @@ public sealed class MpvIpcClient
                 await ApplyDisplayTitleAsync(writer, nextItem.DisplayTitle, cancellationToken);
                 await SendAsync(writer, new
                 {
-                    command = new object[] { "loadfile", nextItem.StreamUri.ToString(), "replace" }
+                    command = BuildLoadFileCommand(nextItem.StreamUri, nextItem.InitialPosition)
                 }, cancellationToken);
             }
         }
@@ -220,6 +221,26 @@ public sealed class MpvIpcClient
     }
 
     /// <summary>
+    /// 构造连播切集命令，并把起播位置作为 mpv 的 per-file option 传入。
+    /// </summary>
+    /// <remarks>
+    /// 首集启动时可能携带 <c>--start</c> 续播参数；mpv 的命令行选项会影响后续文件。
+    /// 因此下一集必须显式传 <c>start=0</c>，否则 mpv 会沿用上一集的历史进度。
+    /// mpv 0.38 起 <c>loadfile</c> 的第四个参数是插入索引，使用 options 时需要把索引设为 -1。
+    /// </remarks>
+    internal static object[] BuildLoadFileCommand(Uri streamUri, TimeSpan initialPosition)
+    {
+        return
+        [
+            "loadfile",
+            streamUri.ToString(),
+            "replace",
+            -1,
+            $"start={FormatLoadFileStartOption(initialPosition)}"
+        ];
+    }
+
+    /// <summary>
     /// 切换文件前更新 mpv 的标题相关选项，避免新一集继续显示上一集标题。
     /// </summary>
     private static async Task ApplyDisplayTitleAsync(
@@ -255,6 +276,19 @@ public sealed class MpvIpcClient
         }
 
         return new string(displayTitle.Where(character => !char.IsControl(character)).ToArray()).Trim();
+    }
+
+    /// <summary>
+    /// 将 TimeSpan 转成 mpv loadfile options 接受的秒数字符串；零值显式保留为 0。
+    /// </summary>
+    private static string FormatLoadFileStartOption(TimeSpan position)
+    {
+        if (position <= TimeSpan.Zero)
+        {
+            return "0";
+        }
+
+        return position.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture);
     }
 
     private static bool TryReadTimePosition(string line, out TimeSpan position)

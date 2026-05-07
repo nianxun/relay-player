@@ -60,6 +60,7 @@ public partial class MainWindow : Window
         TryApplyWindowIcon();
         _embyClient.PlaybackReportFailed += EmbyClient_PlaybackReportFailed;
         _playbackCoordinator.StatusChanged += PlaybackCoordinator_StatusChanged;
+        _playbackCoordinator.PlaybackStopped += PlaybackCoordinator_PlaybackStopped;
         ItemsListView.ItemsSource = _items;
         ServerListBox.ItemsSource = _serverProfiles;
         SeasonComboBox.ItemsSource = _seasons;

@@ -32,6 +32,11 @@ public sealed class PlaybackCoordinator
     public event EventHandler<PlaybackStatusEventArgs>? StatusChanged;
 
     /// <summary>
+    /// mpv.net 停止播放某个条目并完成停止上报后触发，用于界面刷新 Emby 最新播放状态。
+    /// </summary>
+    public event EventHandler<PlaybackStoppedEventArgs>? PlaybackStopped;
+
+    /// <summary>
     /// 启动一次新的播放链，自动取消旧的 IPC 监听，确保进度只回传给当前条目。
     /// </summary>
     public async Task StartAsync(
@@ -156,12 +161,17 @@ public sealed class PlaybackCoordinator
                     request.MediaSource.Id,
                     NormalizePlaybackPositionTicks(position, request.StartTicks),
                     cancellationToken),
-                position => _embyClient.ReportPlaybackStoppedAsync(
-                    request.Item.Id,
-                    request.PlaySessionId,
-                    request.MediaSource.Id,
-                    NormalizePlaybackPositionTicks(position, request.StartTicks),
-                    cancellationToken),
+                async position =>
+                {
+                    var stoppedTicks = NormalizePlaybackPositionTicks(position, request.StartTicks);
+                    await _embyClient.ReportPlaybackStoppedAsync(
+                        request.Item.Id,
+                        request.PlaySessionId,
+                        request.MediaSource.Id,
+                        stoppedTicks,
+                        cancellationToken);
+                    PublishPlaybackStopped(request.Item, stoppedTicks);
+                },
                 cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -209,12 +219,17 @@ public sealed class PlaybackCoordinator
                 request.MediaSource.Id,
                 NormalizePlaybackPositionTicks(position, request.StartTicks),
                 cancellationToken),
-            position => _embyClient.ReportPlaybackStoppedAsync(
-                request.Item.Id,
-                request.PlaySessionId,
-                request.MediaSource.Id,
-                NormalizePlaybackPositionTicks(position, request.StartTicks),
-                cancellationToken),
+            async position =>
+            {
+                var stoppedTicks = NormalizePlaybackPositionTicks(position, request.StartTicks);
+                await _embyClient.ReportPlaybackStoppedAsync(
+                    request.Item.Id,
+                    request.PlaySessionId,
+                    request.MediaSource.Id,
+                    stoppedTicks,
+                    cancellationToken);
+                PublishPlaybackStopped(request.Item, stoppedTicks);
+            },
             async () =>
             {
                 var nextPlayback = await resolveNextAsync(request.Item, chainId, cancellationToken);
@@ -249,6 +264,11 @@ public sealed class PlaybackCoordinator
     private void PublishStatus(string message)
     {
         StatusChanged?.Invoke(this, new PlaybackStatusEventArgs(message));
+    }
+
+    private void PublishPlaybackStopped(EmbyItem item, long stoppedTicks)
+    {
+        PlaybackStopped?.Invoke(this, new PlaybackStoppedEventArgs(item.Id, item.DisplayTitle, stoppedTicks));
     }
 
     private static long NormalizePlaybackPositionTicks(TimeSpan mpvPosition, long requestedStartTicks)
@@ -298,4 +318,23 @@ public sealed class PlaybackStatusEventArgs : EventArgs
     }
 
     public string Message { get; }
+}
+
+/// <summary>
+/// 表示某个 Emby 条目的 mpv.net 播放已经停止，并且客户端已尝试把最终进度上报给 Emby。
+/// </summary>
+public sealed class PlaybackStoppedEventArgs : EventArgs
+{
+    public PlaybackStoppedEventArgs(string itemId, string displayTitle, long positionTicks)
+    {
+        ItemId = itemId;
+        DisplayTitle = displayTitle;
+        PositionTicks = positionTicks;
+    }
+
+    public string ItemId { get; }
+
+    public string DisplayTitle { get; }
+
+    public long PositionTicks { get; }
 }

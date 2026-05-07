@@ -49,8 +49,6 @@ public sealed class EmbyItem : INotifyPropertyChanged
     public int? ParentIndexNumber { get; set; }
     public int? ProductionYear { get; set; }
     public string? OfficialRating { get; set; }
-    public long? RunTimeTicks { get; set; }
-    public DateTimeOffset? DatePlayed { get; set; }
     public string? Overview { get; set; }
     public Dictionary<string, string>? ImageTags { get; set; }
     public List<string>? BackdropImageTags { get; set; }
@@ -65,6 +63,47 @@ public sealed class EmbyItem : INotifyPropertyChanged
     public string? SeriesThumbImageTag { get; set; }
     private EmbyUserData? _userData;
     private Uri? _thumbnailUri;
+    private long? _runTimeTicks;
+    private DateTimeOffset? _datePlayed;
+
+    /// <summary>
+    /// 媒体总时长；播放结束刷新状态时变更它会影响进度百分比和元信息显示。
+    /// </summary>
+    public long? RunTimeTicks
+    {
+        get => _runTimeTicks;
+        set
+        {
+            if (_runTimeTicks == value)
+            {
+                return;
+            }
+
+            _runTimeTicks = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(MetaLine));
+            OnPropertyChanged(nameof(ResumeProgressPercent));
+        }
+    }
+
+    /// <summary>
+    /// 当前用户最后播放时间；mpv 停止后从 Emby 回读时需要通知列表刷新。
+    /// </summary>
+    public DateTimeOffset? DatePlayed
+    {
+        get => _datePlayed;
+        set
+        {
+            if (_datePlayed == value)
+            {
+                return;
+            }
+
+            _datePlayed = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(MetaLine));
+        }
+    }
 
     /// <summary>
     /// 服务器返回的用户播放状态；界面会根据它刷新续播进度和“已播放”徽记。

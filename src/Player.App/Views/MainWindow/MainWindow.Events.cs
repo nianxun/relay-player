@@ -60,6 +60,7 @@ public partial class MainWindow
         CancelEpisodeNavigation();
         CancelPosterLoad();
         _playbackCoordinator.StatusChanged -= PlaybackCoordinator_StatusChanged;
+        _playbackCoordinator.PlaybackStopped -= PlaybackCoordinator_PlaybackStopped;
         _embyClient.PlaybackReportFailed -= EmbyClient_PlaybackReportFailed;
     }
 

@@ -71,6 +71,24 @@ public partial class MainWindow
     }
 
     /// <summary>
+    /// 把播放结束后从 Emby 重新读取到的状态同步到当前所有已加载的同 ID 条目。
+    /// </summary>
+    /// <remarks>
+    /// 停止上报由 Emby 决定最终续播位置和是否已播放，客户端不能只用 mpv 的本地秒数推断；
+    /// 这里用服务器返回的快照覆盖本地状态，避免详情页和继续观看列表显示旧进度。
+    /// </remarks>
+    private void ApplyPlaybackStateSnapshot(EmbyItem snapshot)
+    {
+        foreach (var matchingItem in EnumerateLoadedItems(snapshot.Id))
+        {
+            matchingItem.UserData = snapshot.UserData;
+            matchingItem.DatePlayed = snapshot.DatePlayed;
+            matchingItem.RunTimeTicks = snapshot.RunTimeTicks;
+            matchingItem.ThumbnailUri = snapshot.ThumbnailUri ?? matchingItem.ThumbnailUri;
+        }
+    }
+
+    /// <summary>
     /// 枚举当前界面可能展示的同一 Emby 条目，按引用去重后供状态同步使用。
     /// </summary>
     private IEnumerable<EmbyItem> EnumerateLoadedItems(string itemId)
